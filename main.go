@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"math"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -16,6 +18,8 @@ import (
 // Env: map
 
 var baseEnv = map[string]interface{}{
+	"true":  true,
+	"false": false,
 	"+": func(args ...interface{}) (interface{}, error) {
 		if len(args) < 2 {
 			return nil, fmt.Errorf("+ requires at least two arguments")
@@ -128,49 +132,96 @@ func parse(program string) (interface{}, error) {
 	return ast, nil
 }
 
-func eval(expr interface{}, env map[string]interface{}) (interface{}, error) {
+// returns expr, new environment, error
+func eval(expr interface{}, env map[string]interface{}) (interface{}, map[string]interface{}, error) {
 	switch a := expr.(type) {
-	case []interface{}: // procedure call
-		procedure, err := eval(a[0], env)
-		if err != nil {
-			return nil, fmt.Errorf("could not evaluate %v: %s", a[0], err)
-		}
-		var arguments []interface{}
-		for _, unevaluatedArg := range a[1:] {
-			evaluatedArg, err := eval(unevaluatedArg, env)
-			if err != nil {
-				return nil, fmt.Errorf("could not evaluate %v: %s", unevaluatedArg, err)
+	case []interface{}: // procedure call or keyword
+		if a[0] == "if" { // conditional
+			if len(a) != 4 {
+				return nil, env, fmt.Errorf("incorrect number of arguments to if: %v", a)
 			}
-			arguments = append(arguments, evaluatedArg)
-		}
+			test := a[1]
+			consequence := a[2]
+			alternative := a[3]
 
-		switch p := procedure.(type) {
-		case func(args ...interface{}) (interface{}, error):
-			ret, procedureErr := p(arguments...)
-			if procedureErr != nil {
-				return nil, fmt.Errorf("procedure with identifier %s called with arguments %v failed: %s", a[0], arguments, procedureErr)
+			result, env, err := eval(test, env)
+			if err != nil {
+				return nil, env, fmt.Errorf("failed to evaluate test %v: %s", test, err)
 			}
-			return ret, nil
-		case interface{}:
-			return nil, fmt.Errorf("procedure obtained from map with identifier %s is not a procedure")
+
+			switch r := result.(type) {
+			case bool:
+				if r {
+					conseqEval, env, err := eval(consequence, env)
+					if err != nil {
+						return nil, env, fmt.Errorf("failed to evaluate consequence %v: %s", consequence, err)
+					}
+					return conseqEval, env, nil
+				} else {
+					altEval, env, err := eval(alternative, env)
+					if err != nil {
+						return nil, env, fmt.Errorf("failed to evaluate alternative %v: %s", alternative, err)
+					}
+					return altEval, env, nil
+				}
+			default:
+				return nil, env, fmt.Errorf("test %v did not evaluate to a bool", test)
+			}
+		} else if a[0] == "define" { // definition
+			if len(a) != 3 {
+				return nil, env, fmt.Errorf("incorrect number of arguments to define: %v", a)
+			}
+
+			symbol := a[1]
+			symbolExpr := a[2]
+
+			switch s := symbol.(type) {
+			case string:
+				result, env, err := eval(symbolExpr, env)
+				if err != nil {
+					return nil, env, fmt.Errorf("failed to evaluate symbol expression %v for symbol %s", symbolExpr, symbol)
+				}
+				env[s] = result
+				return nil, env, nil
+			default:
+				return nil, env, fmt.Errorf("symbol %v in define is not a string", symbol)
+			}
+		} else { // procedure call
+			procedure, env, err := eval(a[0], env)
+			if err != nil {
+				return nil, env, fmt.Errorf("could not evaluate %v: %s", a[0], err)
+			}
+			var arguments []interface{}
+			for _, unevaluatedArg := range a[1:] {
+				evaluatedArg, env, err := eval(unevaluatedArg, env)
+				if err != nil {
+					return nil, env, fmt.Errorf("could not evaluate %v: %s", unevaluatedArg, err)
+				}
+				arguments = append(arguments, evaluatedArg)
+			}
+
+			switch p := procedure.(type) {
+			case func(args ...interface{}) (interface{}, error):
+				ret, procedureErr := p(arguments...)
+				if procedureErr != nil {
+					return nil, env, fmt.Errorf("procedure with identifier %s called with arguments %v failed: %s", a[0], arguments, procedureErr)
+				}
+				return ret, env, nil
+			case interface{}:
+				return nil, env, fmt.Errorf("procedure obtained from map with identifier %s is not a procedure")
+			}
 		}
 	case int64: // constant
-		return a, nil
+		return a, env, nil
 	case float64: // constant
-		return a, nil
-	case string: // any number of things
-		if a == "if" { // conditional
-
-		} else if a == "define" { // definition
-
-		} else { // variable reference
-			if _, ok := env[a]; !ok {
-				return nil, fmt.Errorf("symbol %s does not exist in environment", a)
-			}
-			return env[a], nil
+		return a, env, nil
+	case string: // variable reference
+		if _, ok := env[a]; !ok {
+			return nil, env, fmt.Errorf("symbol %s does not exist in environment", a)
 		}
+		return env[a], env, nil
 	}
-	return nil, fmt.Errorf("tried to evaluate the type of %v, which is not a procedure call, constant, keyword, or reference", expr)
+	return nil, env, fmt.Errorf("tried to evaluate the type of %v, which is not a procedure call, constant, keyword, or reference", expr)
 }
 
 func printSliceWithTypes(s []interface{}) {
@@ -189,23 +240,50 @@ func printSliceWithTypes(s []interface{}) {
 	fmt.Printf("]")
 }
 
-func main() {
-	program := "(+ 4 1)"
-	ast, err := parse(program)
-	if err != nil {
-		panic(err)
-	}
-	switch a := ast.(type) {
-	case []interface{}:
-		printSliceWithTypes(a)
-		fmt.Println()
-	case interface{}:
-		fmt.Printf("ast is not a slice and is: %s: %v\n", reflect.TypeOf(a), a)
-	}
+func repl() {
+	env := baseEnv
+	reader := bufio.NewReader(os.Stdin)
+	var result interface{}
+	var err error
+	var ast interface{}
 
-	result, err := eval(ast, baseEnv)
-	if err != nil {
-		panic(err)
+	for {
+		fmt.Print("-> ")
+		text, _ := reader.ReadString('\n')
+		text = strings.Replace(text, "\n", "", -1)
+
+		ast, err = parse(text)
+		if err != nil {
+			fmt.Println("failed to parse input: %s", err)
+		}
+		result, env, err = eval(ast, env)
+		if err != nil {
+			fmt.Println("failed to eval input: %s", err)
+		}
+		fmt.Printf("%v\n", result)
 	}
-	fmt.Printf("%#v\n", result)
+}
+
+func main() {
+	repl()
+	// 	program := "(+ 4 1)"
+	// 	program = "(if true 4 1)"
+	// 	program = "(+ 4 3.5)"
+	// 	ast, err := parse(program)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	switch a := ast.(type) {
+	// 	case []interface{}:
+	// 		printSliceWithTypes(a)
+	// 		fmt.Println()
+	// 	case interface{}:
+	// 		fmt.Printf("ast is not a slice and is: %s: %v\n", reflect.TypeOf(a), a)
+	// 	}
+	//
+	// 	result, _, err := eval(ast, baseEnv)
+	// 	if err != nil {
+	// 		panic(err)
+	// 	}
+	// 	fmt.Printf("%#v\n", result)
 }
