@@ -24,15 +24,6 @@ func tokenize(chars string) []string {
 	return strings.Fields(chars)
 }
 
-//func make_token_channel(tokens []string) chan string {
-//	c := make(chan string, (1<<16 - 1))
-//	for _, token := range tokens {
-//		c <- token
-//	}
-//	close(c)
-//	return c
-//}
-
 // returns an expression, number of tokens processed, and an error
 func readFromTokens(tokens []string) (expr interface{}, processedTokens int, err error) {
 	if len(tokens) == 0 {
@@ -113,7 +104,4 @@ func main() {
 		fmt.Printf("ast is not a slice and is: %s: %v\n", reflect.TypeOf(a), a)
 
 	}
-
-	//var e []interface{}
-	//fmt.Printf("%#v\n", e)
 }
