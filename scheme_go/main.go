@@ -3,11 +3,12 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"math"
 	"os"
 	"reflect"
 	"strconv"
 	"strings"
+
+	"github.com/michaelmdresser/scheme_go/internal"
 )
 
 // Symbol: string
@@ -17,144 +18,44 @@ import (
 // Exp: (Atom, List)
 // Env: map
 
-var baseEnv = map[string]interface{}{
-	"parentEnv": nil,
-	"true":      true,
-	"false":     false,
-	"+": func(args ...interface{}) (interface{}, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("+ requires at least two arguments")
-		}
-		var total float64 = 0
-		var wasAFloat bool
-		for _, arg := range args {
-			switch a := arg.(type) {
-			case int64:
-				total += float64(a)
-			case float64:
-				wasAFloat = true
-				total += a
-			case interface{}:
-				return nil, fmt.Errorf("non-number argument to +: %v", a)
-			}
-		}
+type closure struct {
+	env           environment
+	argumentNames []string
+	expr          interface{}
+}
 
-		if !wasAFloat {
-			return math.Round(total), nil
-		} else {
-			return total, nil
-		}
-	},
-	"-": func(args ...interface{}) (interface{}, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("- requires at least two arguments")
-		}
-		var total float64 = 0
-		var wasAFloat bool
-		var isFirst bool = true
-		for _, arg := range args {
-			switch a := arg.(type) {
-			case int64:
-				if isFirst {
-					isFirst = false
-					total = float64(a)
-				} else {
-					total -= float64(a)
-				}
-			case float64:
-				wasAFloat = true
-				if isFirst {
-					isFirst = false
-					total = a
-				} else {
-					total -= a
-				}
-			case interface{}:
-				return nil, fmt.Errorf("non-number argument to -: %v", a)
-			}
-		}
+type environment struct {
+	parentEnv *environment
+	env       map[string]interface{}
+}
 
-		if !wasAFloat {
-			return math.Round(total), nil
-		} else {
-			return total, nil
-		}
-	},
-	"*": func(args ...interface{}) (interface{}, error) {
-		if len(args) < 2 {
-			return nil, fmt.Errorf("* requires at least two arguments")
-		}
-		var total float64 = 0
-		var wasAFloat bool
-		var isFirst bool = true
-		for _, arg := range args {
-			switch a := arg.(type) {
-			case int64:
-				if isFirst {
-					isFirst = false
-					total = float64(a)
-				} else {
-					total *= float64(a)
-				}
-			case float64:
-				wasAFloat = true
-				if isFirst {
-					isFirst = false
-					total = a
-				} else {
-					total *= a
-				}
-			case interface{}:
-				return nil, fmt.Errorf("non-number argument to *: %v", a)
-			}
-		}
+func (e environment) lookup(name string) (interface{}, error) {
+	if val, ok := e.env[name]; ok {
+		return val, nil
+	}
 
-		if !wasAFloat {
-			return math.Round(total), nil
-		} else {
-			return total, nil
-		}
-	},
-	"/": func(args ...interface{}) (interface{}, error) {
-		if len(args) != 2 {
-			return nil, fmt.Errorf("/ requires exactly two arguments")
-		}
-		var total float64 = 0
-		var wasAFloat bool
-		var isFirst bool = true
-		for _, arg := range args {
-			switch a := arg.(type) {
-			case int64:
-				if isFirst {
-					isFirst = false
-					total = float64(a)
-				} else {
-					total /= float64(a)
-				}
-			case float64:
-				wasAFloat = true
-				if isFirst {
-					isFirst = false
-					total = a
-				} else {
-					total /= a
-				}
-			case interface{}:
-				return nil, fmt.Errorf("non-number argument to /: %v", a)
-			}
-		}
+	if e.parentEnv == nil {
+		return nil, fmt.Errorf("name %s not in environment", name)
+	}
 
-		if !wasAFloat {
-			// having even integer division is possible, this is a check if it was even(ish)
-			// there is probably a better way, but I want to just move on
-			rounded := math.Round(total)
-			if math.Abs(rounded-total) < 0.00001 {
-				return rounded, nil
-			}
-			return total, nil
-		} else {
-			return total, nil
-		}
+	val, err := e.parentEnv.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return val, nil
+}
+
+var baseEnv environment = environment{
+	parentEnv: nil,
+	env: map[string]interface{}{
+		"parentEnv": nil,
+		"true":      true,
+		"false":     false,
+		"+":         internal.Plus,
+		"-":         internal.Minus,
+		"*":         internal.Mult,
+		"/":         internal.Div,
 	},
 }
 
@@ -218,7 +119,7 @@ func parse(program string) (interface{}, error) {
 }
 
 // returns expr, new environment, error
-func eval(expr interface{}, env map[string]interface{}) (interface{}, map[string]interface{}, error) {
+func eval(expr interface{}, env environment) (interface{}, environment, error) {
 	switch a := expr.(type) {
 	case []interface{}: // procedure call or keyword
 		if a[0] == "if" { // conditional
@@ -264,13 +165,41 @@ func eval(expr interface{}, env map[string]interface{}) (interface{}, map[string
 			case string:
 				result, env, err := eval(symbolExpr, env)
 				if err != nil {
-					return nil, env, fmt.Errorf("failed to evaluate symbol expression %v for symbol %s", symbolExpr, symbol)
+					return nil, env, fmt.Errorf("failed to evaluate symbol expression %v for symbol %s: %s", symbolExpr, symbol, err)
 				}
-				env[s] = result
+				env.env[s] = result
 				return nil, env, nil
 			default:
 				return nil, env, fmt.Errorf("symbol %v in define is not a string", symbol)
 			}
+		} else if a[0] == "lambda" {
+			if len(a) != 3 {
+				return nil, env, fmt.Errorf("incorrect number of arguments to lambda: %v", a)
+			}
+
+			argList := a[1]
+			innerExpr := a[2]
+
+			var argListString []string
+			switch al := argList.(type) {
+			case []interface{}:
+				for _, arg := range al {
+					switch a := arg.(type) {
+					case string:
+						argListString = append(argListString, a)
+					default:
+						return nil, env, fmt.Errorf("argument %v was not a string", arg)
+					}
+				}
+			default:
+				return nil, env, fmt.Errorf("first argument to lambda %v was not a list", a)
+			}
+
+			return closure{
+				env:           env,
+				argumentNames: argListString,
+				expr:          innerExpr,
+			}, env, nil
 		} else { // procedure call
 			procedure, env, err := eval(a[0], env)
 			if err != nil {
@@ -292,6 +221,16 @@ func eval(expr interface{}, env map[string]interface{}) (interface{}, map[string
 					return nil, env, fmt.Errorf("procedure with identifier %s called with arguments %v failed: %s", a[0], arguments, procedureErr)
 				}
 				return ret, env, nil
+			case closure:
+				evalEnv := p.env
+				if len(arguments) != len(p.argumentNames) {
+					return nil, env, fmt.Errorf("procedure expects %d arguments, got %d", len(p.argumentNames), len(arguments))
+				}
+
+				for i, arg := range arguments {
+					evalEnv.env[p.argumentNames[i]] = arg
+				}
+				return eval(p.expr, evalEnv)
 			case interface{}:
 				return nil, env, fmt.Errorf("procedure obtained from map with identifier %s is not a procedure")
 			}
@@ -301,10 +240,11 @@ func eval(expr interface{}, env map[string]interface{}) (interface{}, map[string
 	case float64: // constant
 		return a, env, nil
 	case string: // variable reference
-		if _, ok := env[a]; !ok {
-			return nil, env, fmt.Errorf("symbol %s does not exist in environment", a)
+		val, err := env.lookup(a)
+		if err != nil {
+			return nil, env, fmt.Errorf("failed to reference variable: %s", err)
 		}
-		return env[a], env, nil
+		return val, env, nil
 	}
 	return nil, env, fmt.Errorf("tried to evaluate the type of %v, which is not a procedure call, constant, keyword, or reference", expr)
 }
@@ -343,7 +283,7 @@ func repl() {
 		}
 		result, env, err = eval(ast, env)
 		if err != nil {
-			fmt.Println("failed to eval input: %s", err)
+			fmt.Printf("failed to eval input: %s\n", err)
 		}
 		fmt.Printf("%v\n", result)
 	}
@@ -351,24 +291,4 @@ func repl() {
 
 func main() {
 	repl()
-	// 	program := "(+ 4 1)"
-	// 	program = "(if true 4 1)"
-	// 	program = "(+ 4 3.5)"
-	// 	ast, err := parse(program)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	switch a := ast.(type) {
-	// 	case []interface{}:
-	// 		printSliceWithTypes(a)
-	// 		fmt.Println()
-	// 	case interface{}:
-	// 		fmt.Printf("ast is not a slice and is: %s: %v\n", reflect.TypeOf(a), a)
-	// 	}
-	//
-	// 	result, _, err := eval(ast, baseEnv)
-	// 	if err != nil {
-	// 		panic(err)
-	// 	}
-	// 	fmt.Printf("%#v\n", result)
 }
