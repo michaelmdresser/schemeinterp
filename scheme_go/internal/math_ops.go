@@ -5,6 +5,54 @@ import (
 	"math"
 )
 
+type Procedure = func(args ...interface{}) (interface{}, error)
+
+func IsEmpty(args ...interface{}) (interface{}, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("empty? requires exactly 1 argument")
+	}
+
+	switch a := args[0].(type) {
+	case []interface{}:
+		return len(a) == 0, nil
+	default:
+		return nil, fmt.Errorf("empty? must be called on a list")
+	}
+}
+
+func Car(args ...interface{}) (interface{}, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("car requires exactly 1 argument")
+	}
+
+	switch a := args[0].(type) {
+	case []interface{}:
+		if len(a) == 0 {
+			return nil, fmt.Errorf("cannot use car on empty list")
+		}
+		return a[0], nil
+	default:
+		return nil, fmt.Errorf("cannot call car on non-list")
+	}
+}
+
+func Cdr(args ...interface{}) (interface{}, error) {
+	if len(args) != 1 {
+		return nil, fmt.Errorf("cdr requires exactly 1 argument")
+	}
+
+	switch a := args[0].(type) {
+	case []interface{}:
+		if len(a) == 0 {
+			return nil, fmt.Errorf("cannot use cdr on empty list")
+		}
+		return a[1:], nil
+	default:
+		return nil, fmt.Errorf("cannot call cdr on non-list")
+	}
+}
+
+// Plus is a function that expects 2 or more numbers (of any type)
 func Plus(args ...interface{}) (interface{}, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("+ requires at least two arguments")
@@ -30,6 +78,7 @@ func Plus(args ...interface{}) (interface{}, error) {
 	}
 }
 
+// Minus is a function that expects 2 or more numbers (of any type)
 func Minus(args ...interface{}) (interface{}, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("- requires at least two arguments")
@@ -65,6 +114,8 @@ func Minus(args ...interface{}) (interface{}, error) {
 		return total, nil
 	}
 }
+
+// Mult is a function that expects 2 or more numbers (of any type)
 func Mult(args ...interface{}) (interface{}, error) {
 	if len(args) < 2 {
 		return nil, fmt.Errorf("* requires at least two arguments")
@@ -100,6 +151,8 @@ func Mult(args ...interface{}) (interface{}, error) {
 		return total, nil
 	}
 }
+
+// Div is a function that expects 2 or more numbers (of any type)
 func Div(args ...interface{}) (interface{}, error) {
 	if len(args) != 2 {
 		return nil, fmt.Errorf("/ requires exactly two arguments")

@@ -56,6 +56,9 @@ var baseEnv environment = environment{
 		"-":         internal.Minus,
 		"*":         internal.Mult,
 		"/":         internal.Div,
+		"car":       internal.Car,
+		"cdr":       internal.Cdr,
+		"empty?":    internal.IsEmpty,
 	},
 }
 
@@ -172,6 +175,37 @@ func eval(expr interface{}, env environment) (interface{}, environment, error) {
 			default:
 				return nil, env, fmt.Errorf("symbol %v in define is not a string", symbol)
 			}
+		} else if a[0] == "set!" {
+			if len(a) != 3 {
+				return nil, env, fmt.Errorf("set! requires exactly 2 arguments")
+			}
+
+			symbol := a[1]
+			symbolExpr := a[2]
+
+			switch s := symbol.(type) {
+			case string:
+				_, err := env.lookup(s)
+				if err != nil {
+					return nil, env, fmt.Errorf("set! is trying to set symbol %s which does not exist in the environment", s)
+				}
+
+				result, env, err := eval(symbolExpr, env)
+				if err != nil {
+					return nil, env, fmt.Errorf("failed to evaluate symbol expression %v for symbol %s: %s", symbolExpr, symbol, err)
+				}
+				env.env[s] = result
+				return nil, env, nil
+			default:
+				return nil, env, fmt.Errorf("symbol %v in define is not a string", symbol)
+			}
+
+		} else if a[0] == "quote" {
+			if len(a) != 2 {
+				return nil, env, fmt.Errorf("incorrect number of arguments to quote: %v", a)
+			}
+
+			return a[1], env, nil
 		} else if a[0] == "lambda" {
 			if len(a) != 3 {
 				return nil, env, fmt.Errorf("incorrect number of arguments to lambda: %v", a)
@@ -215,7 +249,7 @@ func eval(expr interface{}, env environment) (interface{}, environment, error) {
 			}
 
 			switch p := procedure.(type) {
-			case func(args ...interface{}) (interface{}, error):
+			case internal.Procedure: // builtin
 				ret, procedureErr := p(arguments...)
 				if procedureErr != nil {
 					return nil, env, fmt.Errorf("procedure with identifier %s called with arguments %v failed: %s", a[0], arguments, procedureErr)
@@ -231,8 +265,10 @@ func eval(expr interface{}, env environment) (interface{}, environment, error) {
 					evalEnv.env[p.argumentNames[i]] = arg
 				}
 				return eval(p.expr, evalEnv)
+			case []interface{}: // code as data
+				return eval(p, env)
 			case interface{}:
-				return nil, env, fmt.Errorf("procedure obtained from map with identifier %s is not a procedure")
+				return nil, env, fmt.Errorf("procedure obtained from map with identifier %s is not a procedure", a[0])
 			}
 		}
 	case int64: // constant
@@ -279,11 +315,13 @@ func repl() {
 
 		ast, err = parse(text)
 		if err != nil {
-			fmt.Println("failed to parse input: %s", err)
+			fmt.Printf("failed to parse input: %s\n", err)
+			continue
 		}
 		result, env, err = eval(ast, env)
 		if err != nil {
 			fmt.Printf("failed to eval input: %s\n", err)
+			continue
 		}
 		fmt.Printf("%v\n", result)
 	}
