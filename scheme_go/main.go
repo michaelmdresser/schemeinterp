@@ -36,7 +36,7 @@ var baseEnv environment = environment{
 	env: map[string]interface{}{
 		"parentEnv": nil,
 		"#t":        true,
-		"#t":        false,
+		"#f":        false,
 		"boolean?":  internal.IsBool,
 		"or":        internal.Or,
 		"and":       internal.And,
@@ -51,6 +51,21 @@ var baseEnv environment = environment{
 		"empty?":    internal.IsEmpty,
 		"cons":      internal.Cons,
 	},
+}
+
+func (e environment) duplicate() environment {
+	var dupeEnv environment
+	dupeEnv.env = map[string]interface{}{}
+	for k, v := range e.env {
+		dupeEnv.env[k] = v
+	}
+	if e.parentEnv != nil {
+		parent := *e.parentEnv
+		parentDupe := parent.duplicate()
+		dupeEnv.parentEnv = &parentDupe
+	}
+
+	return dupeEnv
 }
 
 func (e environment) lookup(name string) (interface{}, error) {
@@ -251,7 +266,7 @@ func eval(expr interface{}, env environment) (interface{}, environment, error) {
 			}
 
 			return closure{
-				env:           env,
+				env:           env.duplicate(), // this avoids some dynamic scoping issues (need to dupe not copy pointer)
 				argumentNames: argListString,
 				expr:          innerExpr,
 			}, env, nil
