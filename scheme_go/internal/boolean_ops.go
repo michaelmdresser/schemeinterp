@@ -7,7 +7,7 @@ func IsBool(args ...interface{}) (interface{}, error) {
 		return Null, fmt.Errorf("boolean? requires exactly 1 argument")
 	}
 
-	switch a := args[0].(type) {
+	switch args[0].(type) {
 	case bool:
 		return true, nil
 	default:
