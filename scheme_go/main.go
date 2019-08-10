@@ -18,6 +18,8 @@ import (
 // Exp: (Atom, List)
 // Env: map
 
+type symbol = string
+
 type closure struct {
 	env           environment
 	argumentNames []string
@@ -33,12 +35,17 @@ var baseEnv environment = environment{
 	parentEnv: nil,
 	env: map[string]interface{}{
 		"parentEnv": nil,
-		"true":      true,
-		"false":     false,
+		"#t":        true,
+		"#t":        false,
+		"boolean?":  internal.IsBool,
+		"or":        internal.Or,
+		"and":       internal.And,
 		"+":         internal.Plus,
 		"-":         internal.Minus,
 		"*":         internal.Mult,
 		"/":         internal.Div,
+		"=":         internal.Eq,
+		">":         internal.Gt,
 		"car":       internal.Car,
 		"cdr":       internal.Cdr,
 		"empty?":    internal.IsEmpty,
